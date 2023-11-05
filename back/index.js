@@ -37,6 +37,8 @@ app.post('/register', upload.fields([
 ]), db.register);
 
 app.post('/auth', db.auth);
+app.post('/editPersonData', db.editPersonData);
+app.post('/authenticateWithECP', db.authenticateWithECP);
 
 
 let port = process.env.PORT || 3030;

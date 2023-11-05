@@ -162,7 +162,110 @@ const auth = async (request, response) => {
     }
 }
 
+const editPersonData = async (request, response) => {
+    const client = await pool.connect();
+
+    try {
+        await client.query('BEGIN');
+
+        const {
+            personId,
+            fio,
+            phone,
+            role_id,
+            status_id,
+            sertificate_number,
+            date_of_sert_issue,
+            contract_number,
+            date_of_cont_issue,
+            ward_number,
+            date_of_ward_issue,
+            work_experience
+        } = request.body;
+
+        // Здесь можете добавить дополнительные валидации, если требуется
+        if (fio && !isNameValid(fio)) {
+            throw new Error('Invalid name format.');
+        }
+        if (phone && !isPhoneNumberValid(phone)) {
+            throw new Error('Invalid phone number format.');
+        }
+
+        // Обновление данных в таблице smbt_persons
+        await client.query(`
+            UPDATE smbt_persons SET
+            fio = COALESCE(NULLIF($1, ''), fio),
+            phone = COALESCE(NULLIF($2, ''), phone),
+            role_id = COALESCE(NULLIF($3, 0), role_id),
+            status_id = COALESCE(NULLIF($4, 0), status_id),
+            sertificate_number = COALESCE(NULLIF($5, ''), sertificate_number),
+            date_of_sert_issue = COALESCE(NULLIF($6, ''), date_of_sert_issue),
+            contract_number = COALESCE(NULLIF($7, ''), contract_number),
+            date_of_cont_issue = COALESCE(NULLIF($8, ''), date_of_cont_issue),
+            ward_number = COALESCE(NULLIF($9, ''), ward_number),
+            date_of_ward_issue = COALESCE(NULLIF($10, ''), date_of_ward_issue),
+            work_experience = COALESCE(NULLIF($11, ''), work_experience)
+            WHERE id = $12
+        `, [
+            fio,
+            phone,
+            role_id,
+            status_id,
+            sertificate_number,
+            date_of_sert_issue,
+            contract_number,
+            date_of_cont_issue,
+            ward_number,
+            date_of_ward_issue,
+            work_experience,
+            personId
+        ]);
+
+        await client.query('COMMIT');
+
+        response.status(200).json({ success: true, message: "Data updated successfully" });
+
+    } catch (error) {
+        await client.query('ROLLBACK');
+        response.status(500).json({ success: false, message: error.message });
+    } finally {
+        client.release();
+    }
+}
+
+const authenticateWithECP = async (request, response) => {
+    const { ecpToken } = request.body; 
+
+    try {
+        const sigexResponse = await axios.post(sigexAuthUrl, {
+            token: ecpToken,
+        });
+
+        if (sigexResponse.data && sigexResponse.data.isValid) {
+            const userInfo = sigexResponse.data.user;
+
+            const { rows } = await pool.query('SELECT * FROM smbt_users WHERE ecp_id = $1', [userInfo.ecpId]);
+            if (rows.length === 0) {
+                throw new Error('Пользователь с данным ЭЦП не зарегистрирован.');
+            }
+
+            const user = rows[0];
+
+            const token = generateToken(user.id);
+
+            response.status(200).json({ success: true, token, user: userInfo });
+        } else {
+            throw new Error('Невозможно аутентифицировать пользователя через ЭЦП.');
+        }
+
+    } catch (error) {
+        response.status(500).json({ success: false, message: error.message });
+    }
+}
+
 export default {
     register,
-    auth
+    auth,
+    editPersonData,
+    authenticateWithECP
 }
