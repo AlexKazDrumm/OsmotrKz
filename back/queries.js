@@ -162,76 +162,76 @@ const auth = async (request, response) => {
     }
 }
 
-const editPersonData = async (request, response) => {
+const updatePassword = async (request, response) => {
     const client = await pool.connect();
 
     try {
-        await client.query('BEGIN');
+        const { personId, email, password, confirmPassword } = request.body;
 
-        const {
-            personId,
-            fio,
-            phone,
-            role_id,
-            status_id,
-            sertificate_number,
-            date_of_sert_issue,
-            contract_number,
-            date_of_cont_issue,
-            ward_number,
-            date_of_ward_issue,
-            work_experience
-        } = request.body;
+        if (password && confirmPassword && password === confirmPassword) {
+            await client.query('BEGIN');
 
-        // Здесь можете добавить дополнительные валидации, если требуется
-        if (fio && !isNameValid(fio)) {
-            throw new Error('Invalid name format.');
+            // TODO: Добавьте здесь хеширование пароля, если это необходимо
+            // const hashedPassword = await bcrypt.hash(password, saltRounds);
+
+            // Обновление пароля в таблице smbt_users
+            const res = await client.query(`
+                UPDATE smbt_users
+                SET hashed_password = $1
+                WHERE person_id = $2 AND email = $3
+                RETURNING person_id;
+            `, [password /* Используйте hashedPassword, если пароль хеширован */, personId, email]);
+
+            await client.query('COMMIT');
+
+            if (res.rowCount > 0) {
+                response.status(200).json({ success: true, message: "Password updated successfully" });
+            } else {
+                response.status(404).json({ success: false, message: "User not found or email does not match" });
+            }
+        } else {
+            response.status(400).json({ success: false, message: "Passwords are empty or do not match" });
         }
-        if (phone && !isPhoneNumberValid(phone)) {
-            throw new Error('Invalid phone number format.');
-        }
-
-        // Обновление данных в таблице smbt_persons
-        await client.query(`
-            UPDATE smbt_persons SET
-            fio = COALESCE(NULLIF($1, ''), fio),
-            phone = COALESCE(NULLIF($2, ''), phone),
-            role_id = COALESCE(NULLIF($3, 0), role_id),
-            status_id = COALESCE(NULLIF($4, 0), status_id),
-            sertificate_number = COALESCE(NULLIF($5, ''), sertificate_number),
-            date_of_sert_issue = COALESCE(NULLIF($6, ''), date_of_sert_issue),
-            contract_number = COALESCE(NULLIF($7, ''), contract_number),
-            date_of_cont_issue = COALESCE(NULLIF($8, ''), date_of_cont_issue),
-            ward_number = COALESCE(NULLIF($9, ''), ward_number),
-            date_of_ward_issue = COALESCE(NULLIF($10, ''), date_of_ward_issue),
-            work_experience = COALESCE(NULLIF($11, ''), work_experience)
-            WHERE id = $12
-        `, [
-            fio,
-            phone,
-            role_id,
-            status_id,
-            sertificate_number,
-            date_of_sert_issue,
-            contract_number,
-            date_of_cont_issue,
-            ward_number,
-            date_of_ward_issue,
-            work_experience,
-            personId
-        ]);
-
-        await client.query('COMMIT');
-
-        response.status(200).json({ success: true, message: "Data updated successfully" });
-
     } catch (error) {
         await client.query('ROLLBACK');
         response.status(500).json({ success: false, message: error.message });
     } finally {
         client.release();
     }
-}
+};
+
+const editPersonData = async (request, response) => {
+    const client = await pool.connect();
+
+    try {
+        await client.query('BEGIN');
+
+        const { personId, fio, phone, email } = request.body;
+
+        // Обновление данных в таблице smbt_persons
+        await client.query(`
+            UPDATE smbt_persons SET
+            fio = COALESCE(NULLIF($1, ''), fio),
+            phone = COALESCE(NULLIF($2, ''), phone)
+            WHERE id = $3
+        `, [fio, phone, personId]);
+
+        // Обновление email в таблице smbt_users
+        await client.query(`
+            UPDATE smbt_users SET
+            email = COALESCE(NULLIF($1, ''), email)
+            WHERE person_id = $2
+        `, [email, personId]);
+
+        await client.query('COMMIT');
+        response.status(200).json({ success: true, message: "Data updated successfully" });
+    } catch (error) {
+        await client.query('ROLLBACK');
+        response.status(500).json({ success: false, message: error.message });
+    } finally {
+        client.release();
+    }
+};
 
 const authenticateWithECP = async (request, response) => {
     const { ecpToken, sigexAuthUrl } = request.body; 
@@ -266,6 +266,7 @@ const authenticateWithECP = async (request, response) => {
 export default {
     register,
     auth,
+    updatePassword,
     editPersonData,
     authenticateWithECP
 }

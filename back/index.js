@@ -37,6 +37,7 @@ app.post('/register', upload.fields([
 ]), db.register);
 
 app.post('/auth', db.auth);
+app.post('/updatePassword', db.updatePassword);
 app.post('/editPersonData', db.editPersonData);
 app.post('/authenticateWithECP', db.authenticateWithECP);
 
