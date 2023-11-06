@@ -234,7 +234,7 @@ const editPersonData = async (request, response) => {
 }
 
 const authenticateWithECP = async (request, response) => {
-    const { ecpToken } = request.body; 
+    const { ecpToken, sigexAuthUrl } = request.body; 
 
     try {
         const sigexResponse = await axios.post(sigexAuthUrl, {
