@@ -1,18 +1,21 @@
 import express from 'express';
-const app = express()
-import db from './queries.js'
-import cors from 'cors'
+import db from './queries.js';
+import cors from 'cors';
 import bodyParser from 'body-parser';
 import multer from 'multer';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import fs from 'fs';
 
-app.use(cors())
+const app = express();
 
-app.use(bodyParser.json())
-app.use(
-    bodyParser.urlencoded({
-        extended: true,
-    })
-)
+app.use(cors());
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
 
 const storage = multer.diskStorage({
     destination: function(req, file, cb) {
@@ -36,13 +39,47 @@ app.post('/register', upload.fields([
     { name: 'ward', maxCount: 1 }
 ]), db.register);
 
+app.post('/registerSimple', db.registerSimple);
+
 app.post('/auth', db.auth);
 app.post('/updatePassword', db.updatePassword);
 app.post('/editPersonData', db.editPersonData);
 app.post('/authenticateWithECP', db.authenticateWithECP);
+app.get('/getAllUsers', db.getAllUsers);
+app.patch('/setAdminStatus', db.setAdminStatus);
+app.post('/uploadAvatar', db.uploadAvatar);
+app.post('/setUserAvatar', upload.single('avatar'), db.setUserAvatar);
+app.post('/addRequest', upload.single('doc_photo'), db.addRequest);
+app.get('/getAllRequests', db.getAllRequests);
+app.post('/addToFavorites', db.addToFavorites);
+app.get('/getFavorites/:person_id', db.getFavorites);
+app.delete('/removeFromFavorites/:person_id/:request_id', db.removeFromFavorites);
+app.get('/getAllCities', db.getAllCities);
+app.post('/addNewResponse', db.addNewResponse);
+app.get('/getUserResponses/:user_id', db.getUserResponses);
+app.get('/getResponsesForOrder/:order_id', db.getResponsesForOrder);
+app.post('/uploadWorkPhoto', upload.single('workPhotoFile'), db.uploadWorkPhoto);
+app.post('/respondToResponse', db.respondToResponse);
+app.get('/getOrderDetails/:order_id', db.getOrderDetails);
+app.get('/getAllImageGroups', db.getAllImageGroups);
+app.post('/confirmWorkCompletion', db.confirmWorkCompletion);
+app.post('/rejectWorkCompletion', db.rejectWorkCompletion);
 
+app.get('/file/:filename', (request, response) => {
+    const filename = request.params.filename;
+    const filePath = path.join(__dirname, 'uploads', filename);
 
-let port = process.env.PORT || 3030;
+    // Проверка на существование файла
+    if (fs.existsSync(filePath)) {
+        // Отправка файла для просмотра в браузере
+        response.sendFile(filePath);
+    } else {
+        // Если файл не найден, отправить сообщение об ошибке
+        response.status(404).send('File not found');
+    }
+});
+
+let port = process.env.PORT || 3033;
 
 app.listen(port, (err) => {
     if (err){
