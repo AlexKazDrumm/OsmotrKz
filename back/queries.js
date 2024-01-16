@@ -64,7 +64,8 @@ const register = async (request, response) => {
             sertificate_number, date_of_sert_issue,
             contract_number, date_of_cont_issue,
             ward_number, date_of_ward_issue, work_experience,
-            fio_from_ecp, iin_from_ecp, email_from_ecp, city_id
+            fio_from_ecp, iin_from_ecp, email_from_ecp, city_id,
+            company_title, bin, bill_number, address, bic, director_fio
         } = request.body;
 
         const emailExists = await isEmailExists(email);
@@ -88,11 +89,11 @@ const register = async (request, response) => {
             INSERT INTO smbt_persons 
             (fio, phone, role_id, status_id, sertificate_id, sertificate_number, date_of_sert_issue, 
             insurance_contract_id, contract_number, date_of_cont_issue, 
-            ward_id, ward_number, date_of_ward_issue, work_experience, reg_date, fio_from_ecp, iin_from_ecp, email_from_ecp, city_id) 
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), $15, $16, $17, $18) RETURNING id`,
+            ward_id, ward_number, date_of_ward_issue, work_experience, reg_date, fio_from_ecp, iin_from_ecp, email_from_ecp, city_id, company_title, bin, bill_number, address, bic, director_fio) 
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), $15, $16, $17, $18, $19, $20, $21, $22, $23, $24) RETURNING id`,
             [fio, phone, role_id, status_id, sertificateId, sertificate_number, date_of_sert_issue,
             insuranceContractId, contract_number, date_of_cont_issue,
-            wardId, ward_number, date_of_ward_issue, work_experience, fio_from_ecp, iin_from_ecp, email_from_ecp, city_id]);
+            wardId, ward_number, date_of_ward_issue, work_experience, fio_from_ecp, iin_from_ecp, email_from_ecp, city_id, company_title, bin, bill_number, address, bic, director_fio]);
 
         const personId = personResult.rows[0].id;
 
@@ -108,7 +109,7 @@ const register = async (request, response) => {
         const token = generateToken(personId);
 
         const { rows } = await client.query(`
-            SELECT p.*, u.email, u.is_admin FROM smbt_persons p
+            SELECT p.*, u.email, u.is_admin, u.balance FROM smbt_persons p
             INNER JOIN smbt_users u ON p.id = u.person_id
             WHERE p.id = $1
         `, [personId]);
@@ -168,7 +169,7 @@ const registerSimple = async (request, response) => {
         const token = generateToken(personId);
 
         const { rows } = await client.query(`
-            SELECT p.*, u.email FROM smbt_persons p
+            SELECT p.*, u.email, u.balance FROM smbt_persons p
             INNER JOIN smbt_users u ON p.id = u.person_id
             WHERE p.id = $1
         `, [personId]);
@@ -338,7 +339,7 @@ const authenticateWithECP = async (request, response) => {
 
 const getAllUsers = async (request, response) => {
     try {
-        const { rows } = await pool.query('SELECT p.*, u.email, u.is_admin FROM smbt_persons p INNER JOIN smbt_users u ON p.id = u.person_id');
+        const { rows } = await pool.query('SELECT p.*, u.email, u.is_admin, u.balance FROM smbt_persons p INNER JOIN smbt_users u ON p.id = u.person_id');
         
 
         response.status(200).json({ rows });
@@ -448,29 +449,25 @@ const addRequest = async (request, response) => {
 
         const {
             owner_id, type_id, description, tz, address, price, object_type_id,
-            square, review_date, review_time, order_deadline, phone, is_moving, doc_photo, kad_number,
+            square, review_date, review_time_from, eview_time_to, order_deadline, phone, is_moving,
             movableProperty, status_id, longitude, latitude, city_id
         } = request.body;
 
-        console.log(request.body)
+        console.log(request.body);
 
-        let docPhotoFileName = null;
-        if (request.file) {
-            console.log("Uploading document photo with data:", request.file);
-            docPhotoFileName = await uploadAvatar(request.file);
-            console.log("Uploaded document photo name:", docPhotoFileName);
-        }
+        // Array of tehpassports
+        const tehpassports = request.files;
 
-        console.log({docPhotoFileName})
+        console.log("Uploaded tehpassports:", tehpassports);
 
         let query = 'INSERT INTO smbt_requests (';
         let valuesPart = 'VALUES (';
         let values = [];
         let counter = 1;
 
-        // Динамически добавляем параметры в запрос
+        // Dynamically add parameters to the query
         const allFields = { owner_id, type_id, description, tz, address, price, object_type_id,
-            square, review_date, review_time, order_deadline, phone, is_moving, doc_photo: docPhotoFileName, kad_number,
+            square, review_date, review_time_from, eview_time_to, order_deadline, phone, is_moving,
             status_id, longitude, latitude, city_id };
 
         for (let field in allFields) {
@@ -482,7 +479,7 @@ const addRequest = async (request, response) => {
             }
         }
 
-        // Убираем последнюю запятую и добавляем закрывающую скобку
+        // Remove the last comma and add the closing parenthesis
         query = query.slice(0, -2) + ') ';
         valuesPart = valuesPart.slice(0, -2) + ') RETURNING *';
 
@@ -494,7 +491,26 @@ const addRequest = async (request, response) => {
         const newRequest = requestResult.rows[0];
         console.log("Request added with ID:", newRequest.id);
 
-        // Обработка дополнительных свойств, если они есть
+        // Process tehpassports if they exist
+        if (tehpassports && Array.isArray(tehpassports)) {
+            console.log("Processing tehpassports");
+            for (const tehpassport of tehpassports) {
+                const { kad_number, file } = tehpassport;
+                const tehpassportFileName = await uploadAvatar(file);
+                console.log("Uploaded tehpassport:", tehpassportFileName);
+        
+                // Insert tehpassport into smbt_tehpassports table
+                await client.query(`
+                    INSERT INTO smbt_tehpassports
+                    (request_id, tehpassport, kad_number)
+                    VALUES ($1, $2, $3)`,
+                    [newRequest.id, tehpassportFileName, kad_number]);
+        
+                console.log("Added tehpassport");
+            }
+        }
+
+        // Process movable property if it exists
         if (is_moving && movableProperty && Array.isArray(movableProperty)) {
             console.log("Processing movable property");
             newRequest.movableProperty = [];
@@ -989,6 +1005,68 @@ const rejectWorkCompletion = async (request, response) => {
     }
 };
 
+const rejectResponse = async (request, response) => {
+    const client = await pool.connect();
+
+    try {
+        const { response_id } = request.body;
+
+        // Deleting the response record
+        await client.query(`
+            DELETE FROM smbt_responses
+            WHERE id = $1`, [response_id]);
+
+        response.status(200).json({ success: true, message: "Response rejected successfully" });
+    } catch (error) {
+        console.error('Error occurred:', error);
+        response.status(500).json({ success: false, message: error.message });
+    } finally {
+        client.release();
+    }
+};
+
+const addBalance = async (request, response) => {
+    const client = await pool.connect();
+
+    try {
+        const { amount, userId } = request.body;
+
+        // Update user balance by adding the specified amount
+        await client.query(`
+            UPDATE smbt_users
+            SET balance = balance + $1
+            WHERE id = $2`, [amount, userId]);
+
+        response.status(200).json({ success: true, message: "Balance updated successfully" });
+    } catch (error) {
+        console.error('Error occurred:', error);
+        response.status(500).json({ success: false, message: error.message });
+    } finally {
+        client.release();
+    }
+};
+
+const reduceBalance = async (request, response) => {
+    const client = await pool.connect();
+
+    try {
+        const { amount, userId } = request.body;
+
+        // Update user balance by reducing the specified amount
+        await client.query(`
+            UPDATE smbt_users
+            SET balance = balance - $1
+            WHERE id = $2`, [amount, userId]);
+
+        response.status(200).json({ success: true, message: "Balance updated successfully" });
+    } catch (error) {
+        console.error('Error occurred:', error);
+        response.status(500).json({ success: false, message: error.message });
+    } finally {
+        client.release();
+    }
+};
+
 export default {
     register,
     registerSimple,
@@ -1014,5 +1092,8 @@ export default {
     getOrderDetails,
     getAllImageGroups,
     confirmWorkCompletion,
-    rejectWorkCompletion
+    rejectWorkCompletion,
+    rejectResponse,
+    addBalance,
+    reduceBalance
 }

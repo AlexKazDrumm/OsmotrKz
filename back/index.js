@@ -49,7 +49,7 @@ app.get('/getAllUsers', db.getAllUsers);
 app.patch('/setAdminStatus', db.setAdminStatus);
 app.post('/uploadAvatar', db.uploadAvatar);
 app.post('/setUserAvatar', upload.single('avatar'), db.setUserAvatar);
-app.post('/addRequest', upload.single('doc_photo'), db.addRequest);
+app.post('/addRequest', upload.array('tehpassports', 10), db.addRequest);
 app.get('/getAllRequests', db.getAllRequests);
 app.post('/addToFavorites', db.addToFavorites);
 app.get('/getFavorites/:person_id', db.getFavorites);
@@ -64,6 +64,9 @@ app.get('/getOrderDetails/:order_id', db.getOrderDetails);
 app.get('/getAllImageGroups', db.getAllImageGroups);
 app.post('/confirmWorkCompletion', db.confirmWorkCompletion);
 app.post('/rejectWorkCompletion', db.rejectWorkCompletion);
+app.post('/rejectResponse', db.rejectResponse);
+app.post('/addBalance', db.addBalance);
+app.post('/reduceBalance', db.reduceBalance);
 
 app.get('/file/:filename', (request, response) => {
     const filename = request.params.filename;
