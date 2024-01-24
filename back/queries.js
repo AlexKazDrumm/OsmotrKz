@@ -1,13 +1,11 @@
 import pg from 'pg';
 import moment from 'moment'
 moment.locale('ru');
-import { productionPoolOptions, secretKey } from './accesses.js';
+import { productionPoolOptions, secretKey, transporter } from './accesses.js';
 import bcrypt from 'bcryptjs';
 import fs from 'fs';
 import path from 'path';
 import jwt from 'jsonwebtoken';
-import { request } from 'http';
-import { response } from 'express';
 
 
 const Pool = pg.Pool
@@ -15,16 +13,25 @@ const pool = new Pool(productionPoolOptions);
 
 const SALT_ROUNDS = 10;
 
-const isEmailValid = (email) => /^\S+@\S+\.\S+$/.test(email);
-
 const isEmailExists = async (email) => {
     const { rows } = await pool.query('SELECT email FROM smbt_users WHERE email = $1', [email]);
     return rows.length > 0;
 };
 
-const isPhoneNumberValid = phone => /^(\+?[7-8] ?\(\d{3}\) ?|\+?\d{1,3}[- ]?)?\(?\d{3}\)?[- ]?\d{3}[- ]?\d{2}[- ]?\d{2}$/.test(phone);
+const sendEmail = async (to, subject, text) => {
+    try {
+        const info = await transporter.sendMail({
+            from: 'Agarey131@yandex.ru',
+            to: to,
+            subject: subject,
+            text: text
+        });
 
-const isCertificateNumberValid = number => /^\d{2} \d{2} \d{2} \d{2}$/.test(number);
+        console.log('Письмо успешно отправлено:', info.messageId);
+    } catch (error) {
+        console.error('Ошибка при отправке письма:', error);
+    }
+}
 
 const hashPassword = async (password) => {
     return bcrypt.hash(password, SALT_ROUNDS);
@@ -48,6 +55,26 @@ const saveFileAndRecord = async (file, table) => {
     
     const result = await pool.query(`INSERT INTO ${table} (link) VALUES ($1) RETURNING id`, [targetPath]);
     return result.rows[0].id;
+};
+
+const uploadDocument = async (uploadedFile) => {
+    let randomPostfix = (Math.floor(Math.random() * 1000000) + 1).toString();
+
+    let currentDir = path.dirname(new URL(import.meta.url).pathname);
+    if (process.platform === 'win32') {
+        currentDir = currentDir.substr(1);
+    }
+
+    let fileName = `${randomPostfix}${path.extname(uploadedFile.originalname)}`;
+    let filePath = decodeURIComponent(path.join(currentDir, './uploads', fileName));
+
+    if (!fs.existsSync(path.join(currentDir, './uploads'))) {
+        await fs.promises.mkdir(path.join(currentDir, './uploads'), { recursive: true });
+    }
+
+    await fs.promises.rename(uploadedFile.path, filePath);
+
+    return fileName;
 };
 
 const register = async (request, response) => {
@@ -105,6 +132,9 @@ const register = async (request, response) => {
             [email, hashedPassword, personId]);
 
         await client.query('COMMIT');
+
+        const successMessage = `Поздравляем, ${fio}, вы успешно зарегистрировались на платформе Osmotri!`;
+        await sendEmail(email, 'Регистрация на платформе Osmotri', successMessage);
 
         const token = generateToken(personId);
 
@@ -165,6 +195,9 @@ const registerSimple = async (request, response) => {
             [email, hashedPassword, personId]);
 
         await client.query('COMMIT');
+
+        const successMessage = `Поздравляем, ${fio}, вы успешно зарегистрировались на платформе Osmotri!`;
+        await sendEmail(email, 'Регистрация на платформе Osmotri', successMessage);
 
         const token = generateToken(personId);
 
@@ -354,23 +387,41 @@ const setAdminStatus = async (request, response) => {
     const client = await pool.connect();
     const { person_id } = request.body;
 
-    console.log({person_id})
-
     try {
         await client.query('BEGIN');
-        
+
+        // Обновление статуса в таблице smbt_persons
         const res = await client.query(`
             UPDATE smbt_persons
             SET is_active = true
             WHERE id = $1
-            RETURNING *; 
+            RETURNING *;
         `, [person_id]);
 
         await client.query('COMMIT');
-        
+
         if (res.rowCount > 0) {
             const updatedUserData = res.rows[0];
-            response.status(200).json({ success: true, user: updatedUserData, message: "User status updated successfully" });
+
+            // Получение данных для уведомления
+            const userResult = await client.query(`
+                SELECT u.email, p.fio
+                FROM smbt_users u
+                INNER JOIN smbt_persons p ON u.person_id = p.id
+                WHERE u.person_id = $1;
+            `, [person_id]);
+
+            if (userResult.rows.length > 0) {
+                const { email, fio } = userResult.rows[0];
+
+                // Отправка уведомления
+                const notificationMessage = `${fio}, ваш аккаунт на платформе Osmotri успешно прошел верификацию! Теперь вы можете приступать к работе.`;
+                await sendEmail(email, 'Верификация аккаунта на Osmotri', notificationMessage);
+
+                response.status(200).json({ success: true, user: updatedUserData, message: "User status updated successfully" });
+            } else {
+                response.status(404).json({ success: false, message: "User not found with provided person ID" });
+            }
         } else {
             response.status(404).json({ success: false, message: "User not found with provided person ID" });
         }
@@ -445,29 +496,27 @@ const addRequest = async (request, response) => {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-        console.log("Transaction started");
 
+        console.log("Received request data:", request.body);
+        console.log("Received files:", request.files);
+
+        // Получаем данные из тела запроса
         const {
             owner_id, type_id, description, tz, address, price, object_type_id,
-            square, review_date, review_time_from, eview_time_to, order_deadline, phone, is_moving,
-            movableProperty, status_id, longitude, latitude, city_id
+            square, review_date, review_time_from, review_time_to, order_deadline, phone, is_moving,
+            status_id, longitude, latitude, city_id
         } = request.body;
 
-        console.log(request.body);
-
-        // Array of tehpassports
-        const tehpassports = request.files;
-
-        console.log("Uploaded tehpassports:", tehpassports);
-
+        // Инициализация переменных для запроса
         let query = 'INSERT INTO smbt_requests (';
         let valuesPart = 'VALUES (';
         let values = [];
         let counter = 1;
+        let fieldsAdded = false;
 
-        // Dynamically add parameters to the query
+        // Динамическое добавление параметров к запросу
         const allFields = { owner_id, type_id, description, tz, address, price, object_type_id,
-            square, review_date, review_time_from, eview_time_to, order_deadline, phone, is_moving,
+            square, review_date, review_time_from, review_time_to, order_deadline, phone, is_moving,
             status_id, longitude, latitude, city_id };
 
         for (let field in allFields) {
@@ -476,67 +525,62 @@ const addRequest = async (request, response) => {
                 valuesPart += `$${counter}, `;
                 values.push(allFields[field]);
                 counter++;
+                fieldsAdded = true;
             }
         }
 
-        // Remove the last comma and add the closing parenthesis
+        if (!fieldsAdded) {
+            throw new Error('No valid fields provided for the request.');
+        }
+
+        // Формирование и выполнение итогового запроса
         query = query.slice(0, -2) + ') ';
-        valuesPart = valuesPart.slice(0, -2) + ') RETURNING *';
-
+        valuesPart = valuesPart.slice(0, -2) + ') RETURNING id;';
         const finalQuery = query + valuesPart;
-        console.log("Final query:", finalQuery);
-        console.log("Values:", values);
-
         const requestResult = await client.query(finalQuery, values);
-        const newRequest = requestResult.rows[0];
-        console.log("Request added with ID:", newRequest.id);
+        const newRequestId = requestResult.rows[0].id;
 
-        // Process tehpassports if they exist
-        if (tehpassports && Array.isArray(tehpassports)) {
-            console.log("Processing tehpassports");
-            for (const tehpassport of tehpassports) {
-                const { kad_number, file } = tehpassport;
-                const tehpassportFileName = await uploadAvatar(file);
-                console.log("Uploaded tehpassport:", tehpassportFileName);
-        
-                // Insert tehpassport into smbt_tehpassports table
-                await client.query(`
-                    INSERT INTO smbt_tehpassports
-                    (request_id, tehpassport, kad_number)
-                    VALUES ($1, $2, $3)`,
-                    [newRequest.id, tehpassportFileName, kad_number]);
-        
-                console.log("Added tehpassport");
+        let tehpassportsAdded = [];
+        if (request.files && request.files.length > 0) {
+            for (const file of request.files) {
+                const tehpassportFileName = await uploadDocument(file);
+                console.log("Uploaded tehpassport filename:", tehpassportFileName);
+                const tehpassportResult = await client.query(`
+                    INSERT INTO smbt_tehpassports (request_id, tehpassport)
+                    VALUES ($1, $2) RETURNING *;`,
+                    [newRequestId, tehpassportFileName]);
+                console.log("Tehpassport added to the database:", tehpassportResult.rows[0]);
+                tehpassportsAdded.push(tehpassportResult.rows[0]);
             }
         }
 
-        // Process movable property if it exists
-        if (is_moving && movableProperty && Array.isArray(movableProperty)) {
-            console.log("Processing movable property");
-            newRequest.movableProperty = [];
+        let movablePropertyAdded = [];
+        const movableProperty = JSON.parse(request.body.movableProperty || '[]');
+        if (is_moving && Array.isArray(movableProperty)) {
             for (const property of movableProperty) {
                 const { title, count, unit } = property;
                 const movablePropertyResult = await client.query(`
-                    INSERT INTO smbt_movable_property
-                    (request_id, title, count, unit)
-                    VALUES ($1, $2, $3, $4) RETURNING *`,
-                    [newRequest.id, title, count, unit]);
-
-                newRequest.movableProperty.push(movablePropertyResult.rows[0]);
-                console.log("Added movable property:", movablePropertyResult.rows[0]);
+                    INSERT INTO smbt_movable_property (request_id, title, count, unit)
+                    VALUES ($1, $2, $3, $4) RETURNING *;`,
+                    [newRequestId, title, count, unit]);
+                movablePropertyAdded.push(movablePropertyResult.rows[0]);
             }
         }
 
         await client.query('COMMIT');
-        console.log("Transaction committed");
-        response.status(200).json({ success: true, message: "Request added successfully", requestData: newRequest });
+        response.status(200).json({ 
+            success: true, 
+            message: "Request added successfully", 
+            requestId: newRequestId,
+            tehpassports: tehpassportsAdded,
+            movableProperty: movablePropertyAdded
+        });
     } catch (error) {
+        console.error('Error occurred:', error);
         await client.query('ROLLBACK');
-        console.error('Transaction rolled back due to error:', error);
         response.status(500).json({ success: false, message: error.message });
     } finally {
         client.release();
-        console.log("Database connection released");
     }
 };
 
@@ -1067,6 +1111,287 @@ const reduceBalance = async (request, response) => {
     }
 };
 
+const uploadWorkPhotos = async (request, response) => {
+    const client = await pool.connect();
+
+    try {
+        const files = request.files;
+        if (!files || files.length === 0) {
+            throw new Error('No files provided');
+        }
+
+        const order_id = request.body.order_id ? parseInt(request.body.order_id) : null;
+        const image_group_id = request.body.image_group_id ? parseInt(request.body.image_group_id) : null;
+        const exterminator_id = request.body.exterminator_id ? parseInt(request.body.exterminator_id) : null;
+        const movable_property_id = request.body.movable_property_id ? parseInt(request.body.movable_property_id) : null;
+        const group_category_id = request.body.group_category_id ? parseInt(request.body.group_category_id) : null;
+
+        await client.query('BEGIN');
+
+        for (const file of files) {
+            const imageFileName = await uploadDocument(file);
+
+            const insertQuery = `
+                INSERT INTO smbt_work_photos (order_id, image_group_id, exterminator_id, movable_property_id, group_category_id, image)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                RETURNING *;
+            `;
+            await client.query(insertQuery, [order_id, image_group_id, exterminator_id, movable_property_id, group_category_id, imageFileName]);
+        }
+
+        await client.query('COMMIT');
+        response.status(200).json({ success: true, message: "Work photos uploaded successfully" });
+    } catch (error) {
+        console.error('Error occurred:', error);
+        await client.query('ROLLBACK');
+        response.status(500).json({ success: false, message: error.message });
+    } finally {
+        client.release();
+    }
+};
+
+const deleteWorkPhoto = async (request, response) => {
+    const client = await pool.connect();
+    const photoId = parseInt(request.params.id);
+
+    try {
+        await client.query('BEGIN');
+
+        // Получаем путь файла
+        const selectQuery = 'SELECT image FROM smbt_work_photos WHERE id = $1';
+        const selectResult = await client.query(selectQuery, [photoId]);
+        if (selectResult.rows.length === 0) {
+            throw new Error('File not found');
+        }
+        const filePath = `uploads/${selectResult.rows[0].image}`;
+
+        // Удаляем файл
+        if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+        }
+
+        // Удаляем запись из базы данных
+        const deleteQuery = 'DELETE FROM smbt_work_photos WHERE id = $1';
+        await client.query(deleteQuery, [photoId]);
+
+        await client.query('COMMIT');
+        response.status(200).json({ success: true, message: "Work photo deleted successfully" });
+    } catch (error) {
+        console.error('Error occurred:', error);
+        await client.query('ROLLBACK');
+        response.status(500).json({ success: false, message: error.message });
+    } finally {
+        client.release();
+    }
+};
+
+const getPhotosByCategories = async (request, response) => {
+    const client = await pool.connect();
+    const requestId = parseInt(request.params.request_id);
+
+    try {
+        const categories = await client.query('SELECT * FROM smbt_group_categories');
+        
+        let result = [];
+
+        for (const category of categories.rows) {
+            let categoryData = {
+                category_id: category.id,
+                category_title: category.title,
+                items: []
+            };
+
+            if (category.id >= 1 && category.id <= 3) {
+                // Получаем группы изображений для категорий 1-3
+                const imageGroups = await client.query('SELECT * FROM smbt_image_groups WHERE category_id = $1', [category.id]);
+                for (const group of imageGroups.rows) {
+                    const photos = await client.query('SELECT * FROM smbt_work_photos WHERE order_id = $1 AND image_group_id = $2 AND group_category_id = $3', [requestId, group.id, category.id]);
+                    categoryData.items.push({
+                        group_id: group.id,
+                        group_title: group.title,
+                        photos: photos.rows
+                    });
+                }
+            } else if (category.id === 4) {
+                // Получаем список движимого имущества для категории 4
+                const movableProperties = await client.query('SELECT * FROM smbt_movable_property WHERE request_id = $1', [requestId]);
+                for (const property of movableProperties.rows) {
+                    const photos = await client.query('SELECT * FROM smbt_work_photos WHERE order_id = $1 AND movable_property_id = $2 AND group_category_id = $3', [requestId, property.id, category.id]);
+                    categoryData.items.push({
+                        property_id: property.id,
+                        property_title: property.title,
+                        photos: photos.rows
+                    });
+                }
+            } else if (category.id === 5) {
+                // Получаем фото для категории 5 (Селфи)
+                const photos = await client.query('SELECT * FROM smbt_work_photos WHERE order_id = $1 AND group_category_id = $2', [requestId, category.id]);
+                categoryData.items = photos.rows;
+            }
+
+            result.push(categoryData);
+        }
+
+        response.status(200).json(result);
+    } catch (error) {
+        console.error('Error occurred:', error);
+        response.status(500).json({ success: false, message: error.message });
+    } finally {
+        client.release();
+    }
+};
+
+const updateMovableProperty = async (request, response) => {
+    const client = await pool.connect();
+    
+    try {
+        const { movablePropertyId, factCount, comment } = request.body;
+
+        // Проверяем, передан ли идентификатор движимого имущества
+        if (!movablePropertyId) {
+            throw new Error('Movable property ID is required');
+        }
+
+        // Выполняем запрос на обновление
+        const updateQuery = `
+            UPDATE smbt_movable_property
+            SET fact_count = $1, comment = $2
+            WHERE id = $3;
+        `;
+        await client.query(updateQuery, [factCount, comment, movablePropertyId]);
+
+        response.status(200).json({ success: true, message: "Movable property updated successfully" });
+    } catch (error) {
+        console.error('Error occurred:', error);
+        response.status(500).json({ success: false, message: error.message });
+    } finally {
+        client.release();
+    }
+};
+
+const createReport = async (request, response) => {
+    const client = await pool.connect();
+
+    try {
+        let signFileName = null;
+        // Загружаем sign, если он есть
+        if (request.files['sign'] && request.files['sign'][0]) {
+            signFileName = await uploadDocument(request.files['sign'][0]);
+        }
+
+        // Готовим данные для вставки в smbt_reports
+        const reportData = { ...request.body, created_at: new Date() };
+        if (signFileName) {
+            reportData.sign = signFileName; // Добавляем sign только если файл был загружен
+        }
+
+        const fields = Object.keys(reportData).filter(key => reportData[key] !== undefined);
+        const values = fields.map(key => reportData[key]);
+        const params = fields.map((_, index) => `$${index + 1}`);
+
+        const updateQuery = `
+            INSERT INTO smbt_reports (${fields.join(', ')})
+            VALUES (${params.join(', ')})
+            RETURNING *;
+        `;
+        const reportResult = await client.query(updateQuery, values);
+        const report = reportResult.rows[0];
+
+        // Обработка lpoPhotos
+        let lpoPhotosAdded = [];
+        if (request.files && request.files.lpoPhotos) {
+            for (const photo of request.files.lpoPhotos) {
+                const photoFileName = await uploadDocument(photo);
+                const lpoPhotoResult = await client.query(`
+                    INSERT INTO smbt_lpo_identity_cards (photo, report_id)
+                    VALUES ($1, $2)
+                    RETURNING *;`,
+                    [photoFileName, report.id]);
+                lpoPhotosAdded.push(lpoPhotoResult.rows[0]);
+            }
+        }
+
+        response.status(200).json({ 
+            success: true, 
+            message: "Report updated successfully", 
+            report: report,
+            lpoPhotos: lpoPhotosAdded
+        });
+    } catch (error) {
+        console.error('Error occurred:', error);
+        response.status(500).json({ success: false, message: error.message });
+    } finally {
+        client.release();
+    }
+};
+
+const deleteLpoPhoto = async (request, response) => {
+    const client = await pool.connect();
+    const lpoPhotoId = parseInt(request.params.id);
+
+    try {
+        await client.query('BEGIN');
+
+        // Получаем путь файла
+        const selectQuery = 'SELECT photo FROM smbt_lpo_identity_cards WHERE id = $1';
+        const selectResult = await client.query(selectQuery, [lpoPhotoId]);
+        if (selectResult.rows.length === 0) {
+            throw new Error('LPO photo not found');
+        }
+        const filePath = `uploads/${selectResult.rows[0].photo}`;
+
+        // Удаляем файл
+        if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+        }
+
+        // Удаляем запись из базы данных
+        const deleteQuery = 'DELETE FROM smbt_lpo_identity_cards WHERE id = $1';
+        await client.query(deleteQuery, [lpoPhotoId]);
+
+        await client.query('COMMIT');
+        response.status(200).json({ success: true, message: "LPO photo deleted successfully" });
+    } catch (error) {
+        console.error('Error occurred:', error);
+        await client.query('ROLLBACK');
+        response.status(500).json({ success: false, message: error.message });
+    } finally {
+        client.release();
+    }
+};
+
+const getReportData = async (request, response) => {
+    const client = await pool.connect();
+    const reportId = parseInt(request.params.id);
+
+    try {
+        const reportQuery = `
+            SELECT r.*, 
+                   array_agg(l.photo) as lpo_photos,
+                   req.address as object_address,
+                   p.fio as exterminator_fio
+            FROM smbt_reports r
+            LEFT JOIN smbt_lpo_identity_cards l ON r.id = l.report_id
+            LEFT JOIN smbt_requests req ON r.request_id = req.id
+            LEFT JOIN smbt_persons p ON r.exterminator_id = p.id
+            WHERE r.id = $1
+            GROUP BY r.id, req.address, p.fio;
+        `;
+
+        const reportResult = await client.query(reportQuery, [reportId]);
+        if (reportResult.rows.length === 0) {
+            throw new Error('Report not found');
+        }
+
+        response.status(200).json(reportResult.rows[0]);
+    } catch (error) {
+        console.error('Error occurred:', error);
+        response.status(500).json({ success: false, message: error.message });
+    } finally {
+        client.release();
+    }
+};
+
 export default {
     register,
     registerSimple,
@@ -1095,5 +1420,12 @@ export default {
     rejectWorkCompletion,
     rejectResponse,
     addBalance,
-    reduceBalance
+    reduceBalance,
+    uploadWorkPhotos,
+    deleteWorkPhoto,
+    getPhotosByCategories,
+    updateMovableProperty,
+    createReport,
+    deleteLpoPhoto,
+    getReportData
 }

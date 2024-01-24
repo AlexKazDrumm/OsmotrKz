@@ -67,6 +67,13 @@ app.post('/rejectWorkCompletion', db.rejectWorkCompletion);
 app.post('/rejectResponse', db.rejectResponse);
 app.post('/addBalance', db.addBalance);
 app.post('/reduceBalance', db.reduceBalance);
+app.post('/uploadWorkPhotos', upload.array('workPhotoFiles'), db.uploadWorkPhotos);
+app.delete('/deleteWorkPhoto/:id', db.deleteWorkPhoto);
+app.get('/getPhotosByCategories/:request_id', db.getPhotosByCategories);
+app.put('/updateMovableProperty', db.updateMovableProperty);
+app.post('/createReport', upload.fields([{ name: 'sign', maxCount: 1 }, { name: 'lpoPhotos', maxCount: 10 }]), db.createReport);
+app.delete('/deleteLpoPhoto/:id', db.deleteLpoPhoto);
+app.get('/getReportData/:id', db.getReportData);
 
 app.get('/file/:filename', (request, response) => {
     const filename = request.params.filename;
