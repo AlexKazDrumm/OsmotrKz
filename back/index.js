@@ -74,6 +74,7 @@ app.put('/updateMovableProperty', db.updateMovableProperty);
 app.post('/createReport', upload.fields([{ name: 'sign', maxCount: 1 }, { name: 'lpoPhotos', maxCount: 10 }]), db.createReport);
 app.delete('/deleteLpoPhoto/:id', db.deleteLpoPhoto);
 app.get('/getReportData/:id', db.getReportData);
+app.put('/updateRequestStatus', db.updateRequestStatus);
 
 app.get('/file/:filename', (request, response) => {
     const filename = request.params.filename;

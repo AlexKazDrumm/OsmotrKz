@@ -1392,6 +1392,32 @@ const getReportData = async (request, response) => {
     }
 };
 
+const updateRequestStatus = async (request, response) => {
+    const { request_id, status_id } = request.body;
+
+    if (!request_id || !status_id) {
+        return response.status(400).json({ success: false, message: "request_id and status_id are required" });
+    }
+
+    const client = await pool.connect();
+
+    try {
+        const updateQuery = 'UPDATE smbt_requests SET status_id = $1 WHERE id = $2 RETURNING *;';
+        const updateResult = await client.query(updateQuery, [status_id, request_id]);
+
+        if (updateResult.rows.length === 0) {
+            return response.status(404).json({ success: false, message: "Request not found" });
+        }
+
+        response.status(200).json({ success: true, message: "Request status updated successfully", request: updateResult.rows[0] });
+    } catch (error) {
+        console.error('Error occurred:', error);
+        response.status(500).json({ success: false, message: error.message });
+    } finally {
+        client.release();
+    }
+};
+
 export default {
     register,
     registerSimple,
@@ -1427,5 +1453,6 @@ export default {
     updateMovableProperty,
     createReport,
     deleteLpoPhoto,
-    getReportData
+    getReportData,
+    updateRequestStatus
 }
