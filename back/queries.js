@@ -1242,7 +1242,7 @@ const getPhotosByCategories = async (request, response) => {
                 items: []
             };
 
-            if (category.id >= 1 && category.id <= 3) {
+            if (category.id !=4 && category.id != 5) {
                 // Получаем группы изображений для категорий 1-3
                 const imageGroups = await client.query('SELECT * FROM smbt_image_groups WHERE category_id = $1', [category.id]);
                 for (const group of imageGroups.rows) {
