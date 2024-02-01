@@ -1074,9 +1074,9 @@ const addBalance = async (request, response) => {
     const client = await pool.connect();
     console.log({paymentInfo})
     try {
-        const { amount, userId, paymentInfo } = request.body;
+        const { amount, user_id, payment_status } = request.body;
 
-        if (paymentInfo.payment_status !== 'create') {
+        if (payment_status !== 'created') {
             return response.status(400).json({ success: false, message: "Invalid payment status" });
         }
 
@@ -1086,11 +1086,11 @@ const addBalance = async (request, response) => {
         await client.query(`
             UPDATE smbt_users
             SET balance = COALESCE(balance, 0) + $1
-            WHERE id = $2`, [amount, userId]);
+            WHERE id = $2`, [amount, user_id]);
 
         const { rows } = await client.query(`
             SELECT person_id FROM smbt_users
-            WHERE id = $1`, [userId]);
+            WHERE id = $1`, [user_id]);
 
         const personId = rows[0].person_id;
 
@@ -1115,9 +1115,9 @@ const reduceBalance = async (request, response) => {
     const client = await pool.connect();
 
     try {
-        const { amount, userId, paymentInfo } = request.body;
+        const { amount, user_id, payment_status } = request.body;
 
-        if (paymentInfo.payment_status !== 'create') {
+        if (payment_status !== 'create') {
             return response.status(400).json({ success: false, message: "Invalid payment status" });
         }
 
@@ -1127,11 +1127,11 @@ const reduceBalance = async (request, response) => {
         await client.query(`
             UPDATE smbt_users
             SET balance = COALESCE(balance, 0) - $1
-            WHERE id = $2`, [amount, userId]);
+            WHERE id = $2`, [amount, user_id]);
 
         const { rows } = await client.query(`
             SELECT person_id FROM smbt_users
-            WHERE id = $1`, [userId]);
+            WHERE id = $1`, [user_id]);
 
         const personId = rows[0].person_id;
 
