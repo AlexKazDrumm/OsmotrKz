@@ -1462,7 +1462,7 @@ const updateRequestStatus = async (request, response) => {
 const sendVerificationCode = async (request, response) => {
     const client = await pool.connect();
     try {
-        const { userId } = request.body; // Получаем userId из тела запроса
+        const { email } = request.body; // Получаем userId из тела запроса
 
         // Генерируем случайное 4-хзначное число
         const verificationCode = Math.floor(1000 + Math.random() * 9000);
@@ -1470,8 +1470,8 @@ const sendVerificationCode = async (request, response) => {
         // Получаем текущий адрес электронной почты пользователя
         const userResult = await client.query(`
             SELECT email FROM smbt_users
-            WHERE id = $1`,
-            [userId]
+            WHERE email = $1`,
+            [email]
         );
 
         const userEmail = userResult.rows[0].email;
@@ -1482,8 +1482,8 @@ const sendVerificationCode = async (request, response) => {
         // Обновляем код верификации в smbt_users
         await client.query(`
             UPDATE smbt_users SET verification_code = $1
-            WHERE id = $2`,
-            [verificationCode, userId]
+            WHERE email = $2`,
+            [verificationCode, email]
         );
 
         console.log('Код верификации успешно отправлен');
@@ -1499,13 +1499,13 @@ const sendVerificationCode = async (request, response) => {
 const changePassword = async (request, response) => {
     const client = await pool.connect();
     try {
-        const { userId, newPassword, verificationCode } = request.body;
+        const { email, newPassword, verificationCode } = request.body;
 
         // Проверяем, совпадает ли код верификации
         const userVerificationCodeResult = await client.query(`
             SELECT verification_code FROM smbt_users
-            WHERE id = $1`,
-            [userId]
+            WHERE email = $1`,
+            [email]
         );
 
         const userVerificationCode = userVerificationCodeResult.rows[0].verification_code;
@@ -1520,8 +1520,8 @@ const changePassword = async (request, response) => {
         // Обновляем пароль пользователя
         await client.query(`
             UPDATE smbt_users SET hashed_password = $1, verification_code = NULL
-            WHERE id = $2`,
-            [hashedPassword, userId]
+            WHERE email = $2`,
+            [hashedPassword, email]
         );
 
         console.log('Пароль успешно изменен');
