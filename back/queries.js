@@ -1072,7 +1072,6 @@ const rejectResponse = async (request, response) => {
 
 const addBalance = async (request, response) => {
     const client = await pool.connect();
-    console.log({amount, user_id, payment_status})
     try {
         const { amount, user_id, payment_status } = request.body;
 
