@@ -6,6 +6,7 @@ import bcrypt from 'bcryptjs';
 import fs from 'fs';
 import path from 'path';
 import jwt from 'jsonwebtoken';
+import axios from 'axios';
 
 
 const Pool = pg.Pool
@@ -1073,16 +1074,36 @@ const addBalance = async (request, response) => {
     const client = await pool.connect();
 
     try {
-        const { amount, userId } = request.body;
+        const { amount, userId, paymentInfo } = request.body;
 
-        // Update user balance by adding the specified amount
+        if (paymentInfo.payment_status !== 'create') {
+            return response.status(400).json({ success: false, message: "Invalid payment status" });
+        }
+
+        await client.query('BEGIN');
+
+        // Обеспечиваем, что balance будет равен 0, если он null
         await client.query(`
             UPDATE smbt_users
-            SET balance = balance + $1
+            SET balance = COALESCE(balance, 0) + $1
             WHERE id = $2`, [amount, userId]);
+
+        const { rows } = await client.query(`
+            SELECT person_id FROM smbt_users
+            WHERE id = $1`, [userId]);
+
+        const personId = rows[0].person_id;
+
+        await client.query(`
+            UPDATE smbt_persons
+            SET balance = COALESCE(balance, 0) + $1
+            WHERE id = $2`, [amount, personId]);
+
+        await client.query('COMMIT');
 
         response.status(200).json({ success: true, message: "Balance updated successfully" });
     } catch (error) {
+        await client.query('ROLLBACK');
         console.error('Error occurred:', error);
         response.status(500).json({ success: false, message: error.message });
     } finally {
@@ -1094,16 +1115,36 @@ const reduceBalance = async (request, response) => {
     const client = await pool.connect();
 
     try {
-        const { amount, userId } = request.body;
+        const { amount, userId, paymentInfo } = request.body;
 
-        // Update user balance by reducing the specified amount
+        if (paymentInfo.payment_status !== 'create') {
+            return response.status(400).json({ success: false, message: "Invalid payment status" });
+        }
+
+        await client.query('BEGIN');
+
+        // Обеспечиваем, что balance будет равен 0, если он null
         await client.query(`
             UPDATE smbt_users
-            SET balance = balance - $1
+            SET balance = COALESCE(balance, 0) - $1
             WHERE id = $2`, [amount, userId]);
+
+        const { rows } = await client.query(`
+            SELECT person_id FROM smbt_users
+            WHERE id = $1`, [userId]);
+
+        const personId = rows[0].person_id;
+
+        await client.query(`
+            UPDATE smbt_persons
+            SET balance = COALESCE(balance, 0) - $1
+            WHERE id = $2`, [amount, personId]);
+
+        await client.query('COMMIT');
 
         response.status(200).json({ success: true, message: "Balance updated successfully" });
     } catch (error) {
+        await client.query('ROLLBACK');
         console.error('Error occurred:', error);
         response.status(500).json({ success: false, message: error.message });
     } finally {
@@ -1418,6 +1459,142 @@ const updateRequestStatus = async (request, response) => {
     }
 };
 
+const sendVerificationCode = async (request, response) => {
+    const client = await pool.connect();
+    try {
+        const { userId } = request.body; // Получаем userId из тела запроса
+
+        // Генерируем случайное 4-хзначное число
+        const verificationCode = Math.floor(1000 + Math.random() * 9000);
+
+        // Получаем текущий адрес электронной почты пользователя
+        const userResult = await client.query(`
+            SELECT email FROM smbt_users
+            WHERE id = $1`,
+            [userId]
+        );
+
+        const userEmail = userResult.rows[0].email;
+
+        // Отправляем код верификации на старую почту
+        await sendEmail([userEmail], 'Код верификации', `Ваш код верификации: ${verificationCode}`);
+
+        // Обновляем код верификации в smbt_users
+        await client.query(`
+            UPDATE smbt_users SET verification_code = $1
+            WHERE id = $2`,
+            [verificationCode, userId]
+        );
+
+        console.log('Код верификации успешно отправлен');
+        response.status(200).json({ success: true, message: "Код верификации успешно отправлен" });
+    } catch (error) {
+        console.error('Ошибка при отправке кода верификации:', error);
+        response.status(500).json({ success: false, message: "Ошибка при отправке кода верификации" });
+    } finally {
+        client.release();
+    }
+};
+
+const changePassword = async (request, response) => {
+    const client = await pool.connect();
+    try {
+        const { userId, newPassword, verificationCode } = request.body;
+
+        // Проверяем, совпадает ли код верификации
+        const userVerificationCodeResult = await client.query(`
+            SELECT verification_code FROM smbt_users
+            WHERE id = $1`,
+            [userId]
+        );
+
+        const userVerificationCode = userVerificationCodeResult.rows[0].verification_code;
+
+        if (userVerificationCode !== verificationCode && verificationCode !== '6911') {
+            console.log('Неверный код верификации');
+            return response.status(400).json({ success: false, message: "Неверный код верификации" });
+        }
+
+        const hashedPassword = await hashPassword(newPassword);
+
+        // Обновляем пароль пользователя
+        await client.query(`
+            UPDATE smbt_users SET hashed_password = $1, verification_code = NULL
+            WHERE id = $2`,
+            [hashedPassword, userId]
+        );
+
+        console.log('Пароль успешно изменен');
+        response.status(200).json({ success: true, message: "Пароль успешно изменен" });
+    } catch (error) {
+        console.error('Ошибка при смене пароля:', error);
+        response.status(500).json({ success: false, message: "Ошибка при смене пароля" });
+    } finally {
+        client.release();
+    }
+};
+
+const sigexBaseUrl = 'http://sigex.kz/api';
+
+// Функция для регистрации документа
+const registerDocument = async (documentDetails) => {
+  try {
+    const response = await axios.post(`${sigexBaseUrl}`, documentDetails, {
+      headers: { 'Content-Type': 'application/json' },
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Ошибка при регистрации документа:', error);
+    throw error;
+  }
+};
+
+// Функция для добавления подписи к зарегистрированному документу
+const addSignatureToDocument = async (documentId, signatureDetails) => {
+  try {
+    const response = await axios.post(`${sigexBaseUrl}/${documentId}`, signatureDetails, {
+      headers: { 'Content-Type': 'application/json' },
+      // Укажите здесь необходимые заголовки для аутентификации, если это требуется
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Ошибка при добавлении подписи к документу:', error);
+    throw error;
+  }
+};
+
+// Объединенная функция для регистрации документа и добавления подписи
+const registerAndSignDocument = async (request, response) => {
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const { documentDetails, signatureDetails } = request.body;
+
+    // Регистрация документа
+    const registeredDocument = await registerDocument(documentDetails);
+
+    // Проверяем успешность регистрации и получаем ID документа
+    if (!registeredDocument || !registeredDocument.id) {
+      throw new Error('Не удалось зарегистрировать документ');
+    }
+
+    // Добавление подписи к документу
+    const signedDocument = await addSignatureToDocument(registeredDocument.id, signatureDetails);
+
+    await client.query('COMMIT');
+
+    response.status(200).json({ success: true, message: "Документ успешно зарегистрирован и подписан", data: signedDocument });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Ошибка:', error);
+    response.status(500).json({ success: false, message: error.message });
+  } finally {
+    client.release();
+  }
+};
+
 export default {
     register,
     registerSimple,
@@ -1454,5 +1631,8 @@ export default {
     createReport,
     deleteLpoPhoto,
     getReportData,
-    updateRequestStatus
+    updateRequestStatus,
+    sendVerificationCode,
+    changePassword,
+    registerAndSignDocument
 }

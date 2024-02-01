@@ -75,6 +75,9 @@ app.post('/createReport', upload.fields([{ name: 'sign', maxCount: 1 }, { name: 
 app.delete('/deleteLpoPhoto/:id', db.deleteLpoPhoto);
 app.get('/getReportData/:id', db.getReportData);
 app.put('/updateRequestStatus', db.updateRequestStatus);
+app.post('/sendVerificationCode', db.sendVerificationCode);
+app.post('/changePassword', db.changePassword);
+app.post('/registerAndSignDocument', db.registerAndSignDocument);
 
 app.get('/file/:filename', (request, response) => {
     const filename = request.params.filename;
