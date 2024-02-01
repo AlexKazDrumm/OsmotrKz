@@ -1072,7 +1072,7 @@ const rejectResponse = async (request, response) => {
 
 const addBalance = async (request, response) => {
     const client = await pool.connect();
-    console.log({paymentInfo})
+    console.log({amount, user_id, payment_status})
     try {
         const { amount, user_id, payment_status } = request.body;
 
@@ -1117,7 +1117,7 @@ const reduceBalance = async (request, response) => {
     try {
         const { amount, user_id, payment_status } = request.body;
 
-        if (payment_status !== 'create') {
+        if (payment_status !== 'created') {
             return response.status(400).json({ success: false, message: "Invalid payment status" });
         }
 
