@@ -1124,28 +1124,43 @@ const addBalance = async (request, response) => {
     const client = await pool.connect();
     try {
         const { data } = request.body;
-        console.log('addBalance data', data)
-        const decodedData = Buffer.from(data, "base64").toString(
-            "utf-8"
-        );
-        console.log('addBalance decodedData', decodedData)
+        console.log('addBalance data', data);
+        const decodedData = Buffer.from(data, "base64").toString("utf-8");
+        console.log('addBalance decodedData', decodedData);
         const jsonData = JSON.parse(decodedData);
-        console.log('addBalance jsonData', jsonData)
+        console.log('addBalance jsonData', jsonData);
+
         if (jsonData.error_code) {
+            console.log("Payment error with error_code:", jsonData.error_code);
             return response.status(400).json({ success: false, message: "Payment error" });
         }
 
+        // Преобразуем extra_params из строки в объект JSON
+        const extraParams = JSON.parse(jsonData.extra_params);
+        const userId = Number(extraParams.user_id);
+        if (isNaN(userId)) {
+            console.error('Ошибка: user_id не является числом', extraParams.user_id);
+            throw new Error('Invalid user_id');
+        }
+
         await client.query('BEGIN');
+
+        console.log('Преобразованный user_id:', userId);
 
         // Обеспечиваем, что balance будет равен 0, если он null
         await client.query(`
             UPDATE smbt_users
             SET balance = COALESCE(balance, 0) + $1
-            WHERE id = $2`, [jsonData.amount, jsonData.extra_params.user_id]);
+            WHERE id = $2`, [jsonData.amount, userId]);
 
         const { rows } = await client.query(`
             SELECT person_id FROM smbt_users
-            WHERE id = $1`, [Number(jsonData.extra_params.user_id)]);
+            WHERE id = $1`, [userId]);
+        console.log('Выбранный person_id:', rows.length > 0 ? rows[0].person_id : 'Нет данных');
+
+        if (rows.length === 0) {
+            throw new Error('User not found');
+        }
 
         const personId = rows[0].person_id;
 
@@ -1156,6 +1171,7 @@ const addBalance = async (request, response) => {
 
         await client.query('COMMIT');
 
+        console.log("Balance updated successfully for userId:", userId);
         response.status(200).json({ success: true, message: "Balance updated successfully" });
     } catch (error) {
         await client.query('ROLLBACK');
