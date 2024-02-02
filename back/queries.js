@@ -1594,6 +1594,40 @@ const registerAndSignDocument = async (request, response) => {
   }
 };
 
+const getUserInfo = async (request, response) => {
+    const client = await pool.connect();
+    try {
+        const { userId } = request.params;
+
+        // SQL запрос для получения всех полей и переименования полей id
+        const query = `
+            SELECT
+                smbt_users.id AS user_id,
+                smbt_users.*,
+                smbt_persons.id AS person_id,
+                smbt_persons.*
+            FROM
+                smbt_users
+            JOIN
+                smbt_persons ON smbt_users.person_id = smbt_persons.id
+            WHERE
+                smbt_users.id = $1`;
+
+        const result = await client.query(query, [userId]);
+        const userInfo = result.rows[0]; // Предполагаем, что userId уникален, и возвращаем первый (и единственный) результат
+
+        // Удаление дублирующихся полей id перед отправкой ответа
+        delete userInfo.id;
+
+        response.status(200).json({ success: true, userInfo });
+    } catch (error) {
+        console.error('Error occurred:', error);
+        response.status(500).json({ success: false, message: error.message });
+    } finally {
+        client.release(); // Не забудьте освободить клиента
+    }
+};
+
 export default {
     register,
     registerSimple,
@@ -1633,5 +1667,6 @@ export default {
     updateRequestStatus,
     sendVerificationCode,
     changePassword,
-    registerAndSignDocument
+    registerAndSignDocument,
+    getUserInfo
 }

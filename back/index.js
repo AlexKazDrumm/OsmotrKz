@@ -78,6 +78,7 @@ app.put('/updateRequestStatus', db.updateRequestStatus);
 app.post('/sendVerificationCode', db.sendVerificationCode);
 app.post('/changePassword', db.changePassword);
 app.post('/registerAndSignDocument', db.registerAndSignDocument);
+app.get('/getUserInfo/:userId', db.getUserInfo);
 
 app.get('/file/:filename', (request, response) => {
     const filename = request.params.filename;
