@@ -80,6 +80,13 @@ app.post('/changePassword', db.changePassword);
 app.post('/registerAndSignDocument', db.registerAndSignDocument);
 app.get('/getUserInfo/:userId', db.getUserInfo);
 
+app.get('/getAppLaunchData', (req, res) => {
+    res.json({
+        deepLink: 'kaztokenmobile://', 
+        appStoreLink: 'https://play.google.com/store/apps/details?id=kz.digiflow.kaztokenmobile'
+    });
+});
+
 app.get('/file/:filename', (request, response) => {
     const filename = request.params.filename;
     const filePath = path.join(__dirname, 'uploads', filename);
