@@ -1131,8 +1131,8 @@ const addBalance = async (request, response) => {
         console.log('addBalance decodedData', decodedData)
         const jsonData = JSON.parse(decodedData);
         console.log('addBalance jsonData', jsonData)
-        if (jsonData.payment_status !== 'created') {
-            return response.status(400).json({ success: false, message: "Invalid payment status" });
+        if (jsonData.error_code) {
+            return response.status(400).json({ success: false, message: "Payment error" });
         }
 
         await client.query('BEGIN');
@@ -1178,8 +1178,8 @@ const reduceBalance = async (request, response) => {
         console.log('reduceBalance decodedData', decodedData)
         const jsonData = JSON.parse(decodedData);
         console.log('reduceBalance jsonData', jsonData)
-        if (jsonData.payment_status !== 'created') {
-            return response.status(400).json({ success: false, message: "Invalid payment status" });
+        if (jsonData.error_code) {
+            return response.status(400).json({ success: false, message: "Payment error" });
         }
 
         await client.query('BEGIN');
