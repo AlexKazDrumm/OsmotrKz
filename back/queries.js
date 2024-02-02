@@ -761,7 +761,7 @@ const addNewResponse = async (request, response) => {
         // Добавление записи в таблицу ответов
         const result = await client.query(`
             INSERT INTO smbt_responses (user_id, order_id, finish_date, created_at, is_approved) 
-            VALUES ($1, $2, $3, NOW(), false) RETURNING *`, 
+            VALUES ($1, $2, $3, NOW(), true) RETURNING *`, 
             [user_id, order_id, finish_date]);
 
         // Обновляем статус связанной заявки на 2
@@ -1170,9 +1170,15 @@ const reduceBalance = async (request, response) => {
     const client = await pool.connect();
 
     try {
-        const { amount, user_id, payment_status } = request.body;
-
-        if (payment_status !== 'created') {
+        const { data } = request.body;
+        console.log('reduceBalance data', data)
+        const decodedData = Buffer.from(data, "base64").toString(
+            "utf-8"
+        );
+        console.log('reduceBalance decodedData', decodedData)
+        const jsonData = JSON.parse(decodedData);
+        console.log('reduceBalance jsonData', jsonData)
+        if (jsonData.payment_status !== 'created') {
             return response.status(400).json({ success: false, message: "Invalid payment status" });
         }
 
@@ -1182,18 +1188,18 @@ const reduceBalance = async (request, response) => {
         await client.query(`
             UPDATE smbt_users
             SET balance = COALESCE(balance, 0) - $1
-            WHERE id = $2`, [amount, user_id]);
+            WHERE id = $2`, [jsonData.amount, jsonData.user_id]);
 
         const { rows } = await client.query(`
             SELECT person_id FROM smbt_users
-            WHERE id = $1`, [user_id]);
+            WHERE id = $1`, [jsonData.user_id]);
 
         const personId = rows[0].person_id;
 
         await client.query(`
             UPDATE smbt_persons
             SET balance = COALESCE(balance, 0) - $1
-            WHERE id = $2`, [amount, personId]);
+            WHERE id = $2`, [jsonData.amount, personId]);
 
         await client.query('COMMIT');
 
