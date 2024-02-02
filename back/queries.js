@@ -1611,7 +1611,7 @@ const getUserInfo = async (request, response) => {
             JOIN
                 smbt_persons ON smbt_users.person_id = smbt_persons.id
             WHERE
-                smbt_users.id = $1`;
+                smbt_persons.id = $1`; 
 
         const result = await client.query(query, [userId]);
         const userInfo = result.rows[0]; // Предполагаем, что userId уникален, и возвращаем первый (и единственный) результат
