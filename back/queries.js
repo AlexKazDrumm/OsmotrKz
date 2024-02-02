@@ -1599,7 +1599,6 @@ const getUserInfo = async (request, response) => {
     try {
         const { userId } = request.params;
 
-        // SQL запрос для получения всех полей и переименования полей id
         const query = `
             SELECT
                 smbt_users.id AS user_id,
@@ -1614,9 +1613,8 @@ const getUserInfo = async (request, response) => {
                 smbt_persons.id = $1`; 
 
         const result = await client.query(query, [userId]);
-        const userInfo = result.rows[0]; // Предполагаем, что userId уникален, и возвращаем первый (и единственный) результат
+        const userInfo = result.rows[0]; 
 
-        // Удаление дублирующихся полей id перед отправкой ответа
         delete userInfo.id;
 
         response.status(200).json({ success: true, userInfo });
@@ -1624,7 +1622,7 @@ const getUserInfo = async (request, response) => {
         console.error('Error occurred:', error);
         response.status(500).json({ success: false, message: error.message });
     } finally {
-        client.release(); // Не забудьте освободить клиента
+        client.release(); 
     }
 };
 
