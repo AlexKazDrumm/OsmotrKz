@@ -734,16 +734,50 @@ const addNewResponse = async (request, response) => {
     try {
         const { user_id, order_id, finish_date } = request.body;
 
+        await client.query('BEGIN');
+
+        // Проверка наличия заявок для данного order_id
+        const checkOrderResponse = await client.query(`
+            SELECT * FROM smbt_responses
+            WHERE order_id = $1`, 
+            [order_id]);
+
+        if (checkOrderResponse.rows.length > 0) {
+            await client.query('ROLLBACK');
+            return response.status(400).json({ success: false, message: "У этого заказа уже есть исполнитель" });
+        }
+
+        // Проверка наличия активной заявки для данного user_id
+        const checkActiveResponse = await client.query(`
+            SELECT * FROM smbt_responses
+            WHERE user_id = $1 AND work_status = 'started'`,
+            [user_id]);
+
+        if (checkActiveResponse.rows.length > 0) {
+            await client.query('ROLLBACK');
+            return response.status(400).json({ success: false, message: "У вас не может быть больше одной заявки в работе" });
+        }
+
         // Добавление записи в таблицу ответов
         const result = await client.query(`
             INSERT INTO smbt_responses (user_id, order_id, finish_date, created_at, is_approved) 
-            VALUES ($1, $2, $3, NOW(), true) RETURNING *`, 
+            VALUES ($1, $2, $3, NOW(), false) RETURNING *`, 
             [user_id, order_id, finish_date]);
 
+        // Обновляем статус связанной заявки на 2
+        await client.query(`
+            UPDATE smbt_requests
+            SET status_id = 2
+            WHERE id = $1;`,
+            [order_id]);
+
+        await client.query('COMMIT');
+
         const newResponse = result.rows[0];
-        response.status(200).json({ success: true, message: "Response added successfully", newResponse });
+        response.status(200).json({ success: true, message: "Response added and order status updated successfully", newResponse });
     } catch (error) {
         console.error('Error occurred:', error);
+        await client.query('ROLLBACK');
         response.status(500).json({ success: false, message: error.message });
     } finally {
         client.release();
@@ -904,15 +938,19 @@ const getOrderDetails = async (request, response) => {
                 client.query(`SELECT * FROM smbt_persons WHERE id = $1`, [order.owner_id]),
                 client.query(`
                     SELECT user_id FROM smbt_responses WHERE order_id = $1 AND is_approved = true`, 
-                    [order_id])
+                    [order_id]),
+                // Шаг 2: Получение техпаспортов для заказа
+                client.query(`SELECT * FROM smbt_tehpassports WHERE request_id = $1`, [order_id])
             ];
 
-            const [cityResult, objectTypeResult, typeResult, ownerResult, executorResult] = await Promise.all(additionalInfoQueries);
+            const [cityResult, objectTypeResult, typeResult, ownerResult, executorResult, tehpassportsResult] = await Promise.all(additionalInfoQueries);
 
             order.city = cityResult.rows[0];
             order.objectType = objectTypeResult.rows[0];
             order.type = typeResult.rows[0];
             order.owner = await getPersonDetails(client, ownerResult.rows[0].id);
+            // Добавление информации о техпаспортах к заказу
+            order.tehpassports = tehpassportsResult.rows;
 
             if (executorResult.rows.length > 0) {
                 const executorId = executorResult.rows[0].user_id;
@@ -996,18 +1034,30 @@ const confirmWorkCompletion = async (request, response) => {
 
         await client.query('BEGIN');
 
+        // Обновляем статус работы в smbt_responses и получаем order_id для этого ответа
         const res = await client.query(`
             UPDATE smbt_responses
             SET work_status = 'finished'
             WHERE id = $1
-            RETURNING *;
+            RETURNING order_id;
         `, [response_id]);
 
-        await client.query('COMMIT');
-
         if (res.rowCount > 0) {
-            response.status(200).json({ success: true, message: "Work completion confirmed successfully", updatedResponse: res.rows[0] });
+            const order_id = res.rows[0].order_id;
+
+            // Используем order_id, чтобы обновить статус в smbt_requests
+            await client.query(`
+                UPDATE smbt_requests
+                SET status_id = 3
+                WHERE id = $1;
+            `, [order_id]);
+
+            await client.query('COMMIT');
+
+            response.status(200).json({ success: true, message: "Work completion and request status updated successfully" });
         } else {
+            // Если ответ не найден, откатываем транзакцию и возвращаем ошибку
+            await client.query('ROLLBACK');
             response.status(404).json({ success: false, message: "Response not found" });
         }
     } catch (error) {
@@ -1073,9 +1123,15 @@ const rejectResponse = async (request, response) => {
 const addBalance = async (request, response) => {
     const client = await pool.connect();
     try {
-        const { amount, user_id, payment_status } = request.body;
-        console.log('addBalance', request.body)
-        if (payment_status !== 'created') {
+        const { data } = request.body;
+        console.log('addBalance data', data)
+        const decodedData = Buffer.from(data, "base64").toString(
+            "utf-8"
+        );
+        console.log('addBalance decodedData', decodedData)
+        const jsonData = JSON.parse(decodedData);
+        console.log('addBalance jsonData', jsonData)
+        if (jsonData.payment_status !== 'created') {
             return response.status(400).json({ success: false, message: "Invalid payment status" });
         }
 
@@ -1085,18 +1141,18 @@ const addBalance = async (request, response) => {
         await client.query(`
             UPDATE smbt_users
             SET balance = COALESCE(balance, 0) + $1
-            WHERE id = $2`, [amount, user_id]);
+            WHERE id = $2`, [jsonData.amount, jsonData.user_id]);
 
         const { rows } = await client.query(`
             SELECT person_id FROM smbt_users
-            WHERE id = $1`, [user_id]);
+            WHERE id = $1`, [jsonData.user_id]);
 
         const personId = rows[0].person_id;
 
         await client.query(`
             UPDATE smbt_persons
             SET balance = COALESCE(balance, 0) + $1
-            WHERE id = $2`, [amount, personId]);
+            WHERE id = $2`, [jsonData.amount, personId]);
 
         await client.query('COMMIT');
 
