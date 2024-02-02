@@ -1074,7 +1074,7 @@ const addBalance = async (request, response) => {
     const client = await pool.connect();
     try {
         const { amount, user_id, payment_status } = request.body;
-
+        console.log('addBalance', request.body)
         if (payment_status !== 'created') {
             return response.status(400).json({ success: false, message: "Invalid payment status" });
         }
