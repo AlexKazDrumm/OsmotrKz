@@ -1145,7 +1145,7 @@ const addBalance = async (request, response) => {
 
         const { rows } = await client.query(`
             SELECT person_id FROM smbt_users
-            WHERE id = $1`, [jsonData.extra_params.user_id]);
+            WHERE id = $1`, [Number(jsonData.extra_params.user_id)]);
 
         const personId = rows[0].person_id;
 
