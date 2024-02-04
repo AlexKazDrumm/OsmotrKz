@@ -633,14 +633,24 @@ const addToFavorites = async (request, response) => {
     try {
         const { person_id, request_id } = request.body;
 
-        // Добавление записи в таблицу избранного
-        const result = await client.query(`
-            INSERT INTO smbt_favorites_middleware (person_id, request_id) 
-            VALUES ($1, $2) RETURNING *`, 
-            [person_id, request_id]);
+        // Проверка статуса заказа перед добавлением в избранное
+        const statusCheck = await client.query(`
+            SELECT status_id FROM smbt_requests
+            WHERE id = $1`, [request_id]);
 
-        const favorite = result.rows[0];
-        response.status(200).json({ success: true, message: "Added to favorites successfully", favorite });
+        if (statusCheck.rows.length > 0 && statusCheck.rows[0].status_id === 1) {
+            // Если статус заказа равен 1, добавляем запись в избранное
+            const result = await client.query(`
+                INSERT INTO smbt_favorites_middleware (person_id, request_id) 
+                VALUES ($1, $2) RETURNING *`, 
+                [person_id, request_id]);
+
+            const favorite = result.rows[0];
+            response.status(200).json({ success: true, message: "Added to favorites successfully", favorite });
+        } else {
+            // Если статус заказа не равен 1, отправляем сообщение об ошибке
+            response.status(400).json({ success: false, message: "Request is not in a status that allows adding to favorites" });
+        }
     } catch (error) {
         console.error('Error occurred:', error);
         response.status(500).json({ success: false, message: error.message });
@@ -757,6 +767,12 @@ const addNewResponse = async (request, response) => {
             await client.query('ROLLBACK');
             return response.status(400).json({ success: false, message: "У вас не может быть больше одной заявки в работе" });
         }
+
+        // Удаление заказа из избранных у всех пользователей
+        await client.query(`
+            DELETE FROM smbt_favorites_middleware
+            WHERE request_id = $1`,
+            [order_id]);
 
         // Добавление записи в таблицу ответов
         const result = await client.query(`
@@ -1106,12 +1122,30 @@ const rejectResponse = async (request, response) => {
     try {
         const { response_id } = request.body;
 
-        // Deleting the response record
-        await client.query(`
-            DELETE FROM smbt_responses
+        // Получение order_id для response_id
+        const orderRes = await client.query(`
+            SELECT order_id FROM smbt_responses
             WHERE id = $1`, [response_id]);
+        
+        if (orderRes.rows.length > 0) {
+            const order_id = orderRes.rows[0].order_id;
 
-        response.status(200).json({ success: true, message: "Response rejected successfully" });
+            // Обновление статуса заказа в smbt_requests
+            await client.query(`
+                UPDATE smbt_requests
+                SET status_id = 1
+                WHERE id = $1`, [order_id]);
+            
+            // Удаление записи ответа после обновления статуса заказа
+            await client.query(`
+                DELETE FROM smbt_responses
+                WHERE id = $1`, [response_id]);
+
+            response.status(200).json({ success: true, message: "Response rejected and order status updated successfully" });
+        } else {
+            // Если запись не найдена, отправляем сообщение об ошибке
+            response.status(404).json({ success: false, message: "Response not found" });
+        }
     } catch (error) {
         console.error('Error occurred:', error);
         response.status(500).json({ success: false, message: error.message });
