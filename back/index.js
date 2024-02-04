@@ -79,6 +79,7 @@ app.post('/sendVerificationCode', db.sendVerificationCode);
 app.post('/changePassword', db.changePassword);
 app.post('/registerAndSignDocument', db.registerAndSignDocument);
 app.get('/getUserInfo/:userId', db.getUserInfo);
+app.delete('/deleteRequest', db.deleteRequest);
 
 app.get('/getAppLaunchData', (req, res) => {
     res.json({
