@@ -1719,12 +1719,12 @@ const deleteRequest = async (request, response) => {
     const client = await pool.connect();
 
     try {
-        const { request_id } = request.body;
+        const { id } = request.params;
 
         // Deleting the response record
         await client.query(`
             DELETE FROM smbt_requests
-            WHERE id = $1`, [request_id]);
+            WHERE id = $1`, [id]);
 
         response.status(200).json({ success: true, message: "Request rejected successfully" });
     } catch (error) {
