@@ -1537,7 +1537,7 @@ const getReportData = async (request, response) => {
             LEFT JOIN smbt_lpo_identity_cards l ON r.id = l.report_id
             LEFT JOIN smbt_requests req ON r.request_id = req.id
             LEFT JOIN smbt_persons p ON r.exterminator_id = p.id
-            WHERE r.id = $1
+            WHERE r.request_id = $1
             GROUP BY r.id, req.address, p.fio;
         `;
 
