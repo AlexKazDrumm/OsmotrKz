@@ -41,6 +41,8 @@ app.post('/register', upload.fields([
 
 app.post('/registerSimple', db.registerSimple);
 
+app.post('/fillPdf', db.createPdf);
+
 app.post('/auth', db.auth);
 app.post('/updatePassword', db.updatePassword);
 app.post('/editPersonData', db.editPersonData);

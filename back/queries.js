@@ -7,8 +7,10 @@ import fs from 'fs';
 import path from 'path';
 import jwt from 'jsonwebtoken';
 import axios from 'axios';
-
-
+import { PDFDocument, PDFCheckBox  } from 'pdf-lib';
+import { readFile, writeFile } from 'fs/promises';
+import util from 'util';
+import fontkit from '@pdf-lib/fontkit';
 const Pool = pg.Pool
 const pool = new Pool(productionPoolOptions);
 
@@ -37,6 +39,82 @@ const sendEmail = async (to, subject, text) => {
 const hashPassword = async (password) => {
     return bcrypt.hash(password, SALT_ROUNDS);
 }
+
+// Метод для проверки Библиотеки
+// const createPdf = async (input, output) => {
+//     try {
+//         const pdfDoc = await PDFDocument.load(await readFile(input));
+        
+//         // Получение и вывод в консоль всех полей формы
+//         let fieldName = pdfDoc.getForm().getFields()
+//         // console.log({fieldName});
+        
+//         fieldName = fieldName.map((f)=> f.getName())
+        
+//         console.log(util.inspect(fieldName, { maxArrayLength: null, showHidden: false, depth: null, colors: true }));
+        
+//         const form = pdfDoc.getForm()
+
+//         form.getTextField(fieldName[0]).setText("Proverka")
+
+//         const pdfBytes = await pdfDoc.save();
+        
+//         await writeFile(output, pdfBytes);
+//         console.log('PDF created');
+//     } catch (err){
+//         console.log(err);
+//     }
+// };
+
+// createPdf('template_unlocked.pdf', 'output.pdf')
+
+    //Метод заполнения Пдфки
+const createPdf = async (req, res) => {
+    try {
+      const fieldsData = req.body; 
+  
+
+    const pdfDoc = await PDFDocument.load(await readFile('template_unlocked.pdf'));
+
+    pdfDoc.registerFontkit(fontkit);
+    const url2 = 'https://db.onlinewebfonts.com/t/643e59524d730ce6c6f2384eebf945f8.ttf'
+    const fontBytes = await fetch(url2).then(res => res.arrayBuffer())    
+    const customFont = await pdfDoc.embedFont(fontBytes);
+  
+    // Получение и заполнение формы
+    const form = pdfDoc.getForm();
+    
+    Object.entries(fieldsData).forEach(([fieldName, value]) => {
+        const field = form.getField(fieldName);
+        if (!field) {
+          console.log(`Поле ${fieldName} не найдено.`);
+          return;
+        }
+    
+        if (typeof value === 'string') { // Обработка текстовых полей
+          field.setText(value);
+        } else if (typeof value === 'boolean' && field instanceof PDFCheckBox) { // Обработка переключателей
+          value ? field.check() : field.uncheck();
+        }
+      });
+  
+      // Сохранение измененного PDF в байты
+      const pdfBytes = await pdfDoc.save();
+      fs.writeFileSync('test-output.pdf', pdfBytes);  // Сохранил для локальной проверки // Удалю
+
+      res.setHeader('Content-Disposition', 'attachment; filename=filled-form.pdf');
+      res.setHeader('Content-Type', 'application/pdf');
+      res.end(pdfBytes, 'binary');
+  
+      // Отправка PDF клиенту
+      res.send(pdfBytes);
+    } catch (error) {
+      console.error('Ошибка при создании PDF', error);
+      res.status(500).send(error);
+    }
+  }
+
+
 
 const generateToken = (userId) => {
     return jwt.sign({ id: userId }, secretKey, { expiresIn: '1h' });
@@ -1810,5 +1888,6 @@ export default {
     changePassword,
     registerAndSignDocument,
     getUserInfo,
-    deleteRequest
+    deleteRequest,
+    createPdf
 }
