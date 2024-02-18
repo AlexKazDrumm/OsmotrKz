@@ -2627,7 +2627,7 @@ const getReportData = async (request, response) => {
             throw new Error('Report not found');
         }
 
-        response.status(200).json(reportResult.rows[0]);
+        response.status(200).json(reportResult.rows[reportResult.rows.length - 1]);
     } catch (error) {
         console.error('Error occurred:', error);
         response.status(500).json({ success: false, message: error.message });
