@@ -39,79 +39,95 @@ const hashPassword = async (password) => {
     return bcrypt.hash(password, SALT_ROUNDS);
 }
 
-// Метод для проверки Библиотеки
-// const createPdf = async (input, output) => {
-//     try {
-//         const pdfDoc = await PDFDocument.load(await readFile(input));
-        
-//         // Получение и вывод в консоль всех полей формы
-//         let fieldName = pdfDoc.getForm().getFields()
-//         // console.log({fieldName});
-        
-//         fieldName = fieldName.map((f)=> f.getName())
-        
-//         console.log(util.inspect(fieldName, { maxArrayLength: null, showHidden: false, depth: null, colors: true }));
-        
-//         const form = pdfDoc.getForm()
+const getReportDataForPDF = async (reportId) => {
+    const client = await pool.connect();
+    try {
+        const reportQuery = `
+            SELECT r.*, 
+                   array_agg(l.photo) as lpo_photos,
+                   req.address as object_address,
+                   p.fio as exterminator_fio
+            FROM smbt_reports r
+            LEFT JOIN smbt_lpo_identity_cards l ON r.id = l.report_id
+            LEFT JOIN smbt_requests req ON r.request_id = req.id
+            LEFT JOIN smbt_persons p ON r.exterminator_id = p.id
+            WHERE r.request_id = $1
+            GROUP BY r.id, req.address, p.fio;
+        `;
+        const reportResult = await client.query(reportQuery, [parseInt(reportId)]);
+        if (reportResult.rows.length === 0) {
+            throw new Error('Report not found');
+        }
+        return reportResult.rows[reportResult.rows.length - 1];
+    } catch (error) {
+        console.error('Error occurred:', error);
+        throw error; // Пробрасываем ошибку дальше
+    } finally {
+        client.release();
+    }
+};
 
-//         form.getTextField(fieldName[0]).setText("Proverka")
+const getPhotosByCategoriesForPDF = async (requestId) => {
+    const client = await pool.connect();
+    requestId = parseInt(requestId); // Убедитесь, что requestId - это число
+    const baseUrl = "https://api.osmotri.kz/file/"; // Укажите здесь базовый URL для изображений
 
-//         const pdfBytes = await pdfDoc.save();
-        
-//         await writeFile(output, pdfBytes);
-//         console.log('PDF created');
-//     } catch (err){
-//         console.log(err);
-//     }
-// };
+    try {
+        const categories = await client.query('SELECT * FROM smbt_group_categories');
+        let result = [];
 
-// createPdf('template_unlocked.pdf', 'output.pdf')
+        for (const category of categories.rows) {
+            let categoryData = {
+                category_id: category.id,
+                category_title: category.title,
+                items: []
+            };
 
-    //Метод заполнения Пдфки
-// const createPdf = async (req, res) => {
-//     try {
-//       const fieldsData = req.body; 
-  
+            if (category.id != 4 && category.id != 5) {
+                const imageGroups = await client.query('SELECT * FROM smbt_image_groups WHERE category_id = $1', [category.id]);
+                for (const group of imageGroups.rows) {
+                    const photos = await client.query('SELECT * FROM smbt_work_photos WHERE order_id = $1 AND image_group_id = $2 AND group_category_id = $3', [requestId, group.id, category.id]);
+                    categoryData.items.push({
+                        group_id: group.id,
+                        group_title: group.title,
+                        photos: photos.rows.map(photo => ({
+                            ...photo,
+                            image: `${baseUrl}${photo.image}` // Модификация здесь
+                        }))
+                    });
+                }
+            } else if (category.id === 4) {
+                const movableProperties = await client.query('SELECT * FROM smbt_movable_property WHERE request_id = $1', [requestId]);
+                for (const property of movableProperties.rows) {
+                    const photos = await client.query('SELECT * FROM smbt_work_photos WHERE order_id = $1 AND movable_property_id = $2 AND group_category_id = $3', [requestId, property.id, category.id]);
+                    categoryData.items.push({
+                        property_id: property.id,
+                        property_title: property.title,
+                        photos: photos.rows.map(photo => ({
+                            ...photo,
+                            image: `${baseUrl}${photo.image}` // Модификация здесь
+                        }))
+                    });
+                }
+            } else if (category.id === 5) {
+                const photos = await client.query('SELECT * FROM smbt_work_photos WHERE order_id = $1 AND group_category_id = $2', [requestId, category.id]);
+                categoryData.items = photos.rows.map(photo => ({
+                    ...photo,
+                    image: `${baseUrl}${photo.image}` // Модификация здесь
+                }));
+            }
 
-//     const pdfDoc = await PDFDocument.load(await readFile('template_unlocked.pdf'));
+            result.push(categoryData);
+        }
 
-//     pdfDoc.registerFontkit(fontkit);
-//     const url2 = 'https://db.onlinewebfonts.com/t/643e59524d730ce6c6f2384eebf945f8.ttf'
-//     const fontBytes = await fetch(url2).then(res => res.arrayBuffer())    
-//     const customFont = await pdfDoc.embedFont(fontBytes);
-  
-//     // Получение и заполнение формы
-//     const form = pdfDoc.getForm();
-    
-//     Object.entries(fieldsData).forEach(([fieldName, value]) => {
-//         const field = form.getField(fieldName);
-//         if (!field) {
-//           console.log(`Поле ${fieldName} не найдено.`);
-//           return;
-//         }
-    
-//         if (typeof value === 'string') { // Обработка текстовых полей
-//           field.setText(value);
-//         } else if (typeof value === 'boolean' && field instanceof PDFCheckBox) { // Обработка переключателей
-//           value ? field.check() : field.uncheck();
-//         }
-//       });
-  
-//       // Сохранение измененного PDF в байты
-//       const pdfBytes = await pdfDoc.save();
-//       fs.writeFileSync('test-output.pdf', pdfBytes);  // Сохранил для локальной проверки // Удалю
-
-//       res.setHeader('Content-Disposition', 'attachment; filename=filled-form.pdf');
-//       res.setHeader('Content-Type', 'application/pdf');
-//       res.end(pdfBytes, 'binary');
-  
-//       // Отправка PDF клиенту
-//       res.send(pdfBytes);
-//     } catch (error) {
-//       console.error('Ошибка при создании PDF', error);
-//       res.status(500).send(error);
-//     }
-//   }
+        return result; // Возвращаем результат напрямую
+    } catch (error) {
+        console.error('Error occurred:', error);
+        throw error; // Пробрасываем ошибку для обработки на более высоком уровне
+    } finally {
+        client.release();
+    }
+};
 
 const createPdf = async (req, res) => {
     // Создаем новый PDF документ
@@ -120,6 +136,11 @@ const createPdf = async (req, res) => {
         margin: 10
     });
 
+    const reqId = req.body.id;
+    const reportData = await getReportDataForPDF(reqId); // Получаем данные отчета
+    const photoData = await getPhotosByCategoriesForPDF(reqId)
+
+    console.log(reportData, photoData);
     // Устанавливаем заголовок и тип содержимого для ответа
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'attachment; filename="generated.pdf"');
@@ -1009,51 +1030,6 @@ const createPdf = async (req, res) => {
     // Завершаем PDF и закрываем поток ответа
     doc.end();
 }
-
-async function createPdfDocument(requestId) {
-    // Получение данных
-    const reportData = await getReportData(requestId);
-    const photosByCategories = await getPhotosByCategories(requestId);
-
-    // Создание нового документа
-    const doc = new PDFDocument();
-    doc.pipe(fs.createWriteStream(`report-${requestId}.pdf`));
-
-    // Добавление информации из reportData
-    doc.fontSize(25).text('Отчет', {
-        align: 'center'
-    });
-    doc.fontSize(12).text(`Адрес объекта: ${reportData.object_address}`, {
-        align: 'left'
-    });
-    doc.text(`ФИО эксперта: ${reportData.exterminator_fio}`, {
-        align: 'left'
-    });
-    // И так далее для других полей из reportData
-
-    // Перебор фотографий по категориям и добавление их в документ
-    photosByCategories.forEach(category => {
-        doc.addPage().fontSize(20).text(category.category_title, {
-            align: 'center'
-        });
-        category.items.forEach(item => {
-            item.photos.forEach(photo => {
-                // Здесь предполагается, что вы имеете локальный путь к фотографии или URL
-                // Если у вас URL, вам нужно сначала скачать изображение
-                doc.image(photo.image, {
-                    fit: [250, 300],
-                    align: 'center',
-                    valign: 'center'
-                });
-                doc.moveDown();
-            });
-        });
-    });
-
-    // Завершение и сохранение документа
-    doc.end();
-}
-
 
 const generateToken = (userId) => {
     return jwt.sign({ id: userId }, secretKey, { expiresIn: '1h' });
@@ -2484,7 +2460,6 @@ const getPhotosByCategories = async (request, response) => {
     }
 };
 
-
 const updateMovableProperty = async (request, response) => {
     const client = await pool.connect();
     
@@ -2892,6 +2867,5 @@ export default {
     registerAndSignDocument,
     getUserInfo,
     deleteRequest,
-    createPdf,
-    createPdfDocument
+    createPdf
 }

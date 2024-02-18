@@ -42,7 +42,6 @@ app.post('/register', upload.fields([
 app.post('/registerSimple', db.registerSimple);
 
 app.post('/fillPdf', db.createPdf);
-app.post('/createPdf/:request_id', db.createPdfDocument);
 
 
 app.post('/auth', db.auth);
