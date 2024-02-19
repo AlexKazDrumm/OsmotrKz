@@ -1,5 +1,6 @@
 import express from 'express';
 import db from './queries.js';
+import pdf from './createpdf.js';
 import cors from 'cors';
 import bodyParser from 'body-parser';
 import multer from 'multer';
@@ -41,7 +42,7 @@ app.post('/register', upload.fields([
 
 app.post('/registerSimple', db.registerSimple);
 
-app.post('/fillPdf', db.createPdf);
+app.post('/fillPdf/:reqId', pdf.createPdf);
 
 
 app.post('/auth', db.auth);
