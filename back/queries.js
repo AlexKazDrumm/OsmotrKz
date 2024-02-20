@@ -1357,6 +1357,7 @@ const deleteWorkPhoto = async (request, response) => {
 const getPhotosByCategories = async (request, response) => {
     const client = await pool.connect();
     const requestId = parseInt(request.params.request_id);
+    const baseUrl = "https://api.osmotri.kz/file/"; // Укажите здесь базовый URL для изображений
 
     try {
         const categories = await client.query('SELECT * FROM smbt_group_categories');
@@ -1379,7 +1380,7 @@ const getPhotosByCategories = async (request, response) => {
                         group_title: group.title,
                         photos: photos.rows.map(photo => ({
                             ...photo,
-                            image: photo.image // Модификация здесь
+                            image: `${baseUrl}${photo.image}` // Модификация здесь
                         }))
                     });
                 }
