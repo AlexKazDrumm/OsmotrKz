@@ -1450,8 +1450,8 @@ const createReport = async (request, response) => {
 
     try {
         let signFileName = null;
-        // Загружаем sign, если он есть
-        if (request.files['sign'] && request.files['sign'][0]) {
+        // Безопасная загрузка sign, если он есть
+        if (request.files && request.files['sign'] && request.files['sign'][0]) {
             signFileName = await uploadDocument(request.files['sign'][0]);
         }
 
