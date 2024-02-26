@@ -42,7 +42,7 @@ app.post('/register', upload.fields([
 
 app.post('/registerSimple', db.registerSimple);
 
-app.post('/fillPdf/:reqId', pdf.createPdf);
+app.get('/fillPdf/:reqId', pdf.createPdf);
 
 
 app.post('/auth', db.auth);
